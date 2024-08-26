@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobtions Email Validation</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        #downloadBtn {
+            display: none;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Email Validation</h2>
+    <form id="csvForm">
+        <label for="fileInput">Upload CSV file:</label><br><br>
+        <input type="file" id="fileInput" accept=".csv"><br><br>
+        <input type="button" value="Validate Emails from CSV" onclick="processCSV()">
+    </form>
+    
+    <button id="downloadBtn" onclick="downloadCSV()">Download Valid Emails</button>
+
+    <h3>Check a Single Email</h3>
+    <input type="text" id="singleEmailInput" placeholder="Enter email to check">
+    <input type="button" value="Check Email" onclick="checkSingleEmail()">
+    
+    <h3>Single Email Validation Result</h3>
+    <div id="singleEmailResult"></div>
+
+    <h3>Valid Emails</h3>
+    <table id="validEmailsTable">
+        <thead>
+            <tr>
+                <th>Email</th>
+                <th>Valid MX Records</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <h3>Invalid Emails</h3>
+    <table id="invalidEmailsTable">
+        <thead>
+            <tr>
+                <th>Email</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        let validEmails = [];
+
+        function processCSV() {
+            const fileInput = document.getElementById('fileInput').files[0];
+            const validTableBody = document.querySelector('#validEmailsTable tbody');
+            const invalidTableBody = document.querySelector('#invalidEmailsTable tbody');
+            const downloadBtn = document.getElementById('downloadBtn');
+
+            validTableBody.innerHTML = '';
+            invalidTableBody.innerHTML = '';
+            validEmails = [];
+
+            if (!fileInput) {
+                alert('Please upload a CSV file.');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const csvData = event.target.result;
+                const lines = csvData.split('\n');
+
+                lines.forEach((line) => {
+                    const email = line.trim();
+                    if (email) {
+                        validateEmail(email, validTableBody, invalidTableBody);
+                    }
+                });
+            };
+            reader.readAsText(fileInput);
+        }
+
+        function validateEmail(email, validTableBody, invalidTableBody, showResult = false) {
+    // Basic syntax check
+    const emailPattern = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/;
+    if (!emailPattern.test(email)) {
+        if (showResult) {
+            displaySingleEmailResult(email, 'Invalid email format');
+        } else {
+            const row = invalidTableBody.insertRow();
+            row.insertCell(0).textContent = email;
+            row.insertCell(1).textContent = 'Invalid email format';
+        }
+        return;
+    }
+
+    // Domain check
+    const domain = email.split('@')[1];
+    fetch(`https://dns.google/resolve?name=${domain}&type=MX`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.Status === 0 && data.Answer && data.Answer.length > 0) {
+                const validMxRecords = data.Answer
+                    .map(record => {
+                        const [priority, mx] = record.data.split(' ');
+                        return parseInt(priority) === 10 ? record.data : null;
+                    })
+                    .filter(record => record !== null);
+
+                const invalidMxRecords = data.Answer
+                    .map(record => record.data)
+                    .filter(record => !validMxRecords.includes(record))
+                    .join(', ');
+
+                if (validMxRecords.length > 0) {
+                    if (showResult) {
+                        displaySingleEmailResult(email, 'Valid', validMxRecords.join(', '));
+                    } else {
+                        const row = validTableBody.insertRow();
+                        row.insertCell(0).textContent = email;
+                        row.insertCell(1).textContent = validMxRecords.join(', ');
+                        validEmails.push(email);
+                    }
+                } else {
+                    if (showResult) {
+                        displaySingleEmailResult(email, 'No valid MX records found. Invalid MX: ' + invalidMxRecords);
+                    } else {
+                        const row = invalidTableBody.insertRow();
+                        row.insertCell(0).textContent = email;
+                        row.insertCell(1).textContent = 'No valid MX records found. Invalid MX: ' + invalidMxRecords;
+                    }
+                }
+            } else {
+                if (showResult) {
+                    displaySingleEmailResult(email, 'No MX records found');
+                } else {
+                    const row = invalidTableBody.insertRow();
+                    row.insertCell(0).textContent = email;
+                    row.insertCell(1).textContent = 'No MX records found';
+                }
+            }
+
+            // Show the download button if there are valid emails
+            if (validEmails.length > 0) {
+                document.getElementById('downloadBtn').style.display = 'block';
+            }
+        })
+        .catch(error => {
+            if (showResult) {
+                displaySingleEmailResult(email, 'Error checking domain: ' + error.message);
+            } else {
+                const row = invalidTableBody.insertRow();
+                row.insertCell(0).textContent = email;
+                row.insertCell(1).textContent = 'Error checking domain: ' + error.message;
+            }
+        });
+}
+
+
+        function checkSingleEmail() {
+            const email = document.getElementById('singleEmailInput').value.trim();
+            if (email) {
+                validateEmail(email, null, null, true);
+            } else {
+                alert('Please enter an email address.');
+            }
+        }
+
+        function displaySingleEmailResult(email, status, mxRecords = '') {
+            const resultDiv = document.getElementById('singleEmailResult');
+            resultDiv.innerHTML = `<strong>Email:</strong> ${email} <br> <strong>Status:</strong> ${status} ${mxRecords ? `<br> <strong>MX Records:</strong> ${mxRecords}` : ''}`;
+        }
+
+        function downloadCSV() {
+            const csvContent = "data:text/csv;charset=utf-8," 
+                + validEmails.map(e => e).join("\n");
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "valid_emails.csv");
+            document.body.appendChild(link);
+
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
